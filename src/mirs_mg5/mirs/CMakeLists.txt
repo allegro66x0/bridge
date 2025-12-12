@@ -68,9 +68,10 @@ install(TARGETS
 )
 
 install(DIRECTORY
-  launch
   config
+  launch
   rviz
+  maps
   DESTINATION share/${PROJECT_NAME}/
 )
 

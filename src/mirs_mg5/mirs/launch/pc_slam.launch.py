@@ -18,7 +18,11 @@ def generate_launch_description():
     mirs_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(mirs_share_dir, 'launch', 'mirs.launch.py')
-        )
+        ),
+        launch_arguments={
+            'enable_micro_ros': LaunchConfiguration('enable_micro_ros'),
+            'lidar_model': LaunchConfiguration('lidar_model')
+        }.items()
     )
 
     # --- 2. SLAM (slam_toolbox) の設定 ---
@@ -32,6 +36,16 @@ def generate_launch_description():
             'config',
             'slam_toolbox_config.yaml'),
         description='The full path to the config file for SLAM')
+
+    enable_micro_ros_arg = DeclareLaunchArgument(
+        'enable_micro_ros', default_value='true',
+        description='Enable micro_ros_agent.'
+    )
+
+    lidar_model_arg = DeclareLaunchArgument(
+        'lidar_model', default_value='s1',
+        description='Model of the LiDAR (s1, a1, a2, a3)'
+    )
 
     # slam_toolbox ノードの定義
     slam_node = Node(
@@ -72,8 +86,11 @@ def generate_launch_description():
     ld = LaunchDescription()
     
     # 引数の宣言を追加
+    # 引数の宣言を追加
     ld.add_action(declare_arg_slam_config_file)
     ld.add_action(declare_arg_rviz2_config_path)
+    ld.add_action(enable_micro_ros_arg)
+    ld.add_action(lidar_model_arg)
 
     # 起動するノードを追加
     ld.add_action(mirs_launch)   # T1 の役割

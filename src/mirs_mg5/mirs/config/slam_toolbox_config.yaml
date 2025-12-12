@@ -14,14 +14,14 @@ slam_toolbox:
     # --- 3. ★ センサーのフィルタリング（クラッシュ対策） ★ ---
     # LiDARの仕様に合わせて設定 (以前のログ より)
     scan_topic: "/scan"
-    min_scan_range: 0.05  # 0.05m より近いデータは無視
-    max_scan_range: 40.0  # 40.0m より遠いデータは無視
+    min_laser_range: 0.1   # 0.1m より近いデータは無視
+    max_laser_range: 40.0  # 40.0m より遠いデータは無視
 
     # 無効な値 (.inf や NaN) を除外する（これが重要）
     scan_filter_type: "LaserScan"
     scan_filter:
       type: "LaserScan"
-      min_range: 0.05
+      min_range: 0.1
       max_range: 40.0
       min_intensity: 0.0
       max_intensity: 100000.0 # ほとんどのLiDARで十分な値
