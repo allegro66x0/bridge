@@ -17,8 +17,11 @@ def generate_launch_description():
         description='Set lidar usb port.')
     
     # YAMLファイルのパス（エラーが起きるときは絶対パスに変更を推奨）
-    config_file_path = "/home/sawara/mirs_ws/src/mirs_mg5/mirs/config/config.yaml"
-    #config_file_path = your_file_path
+    config_file_path = os.path.join(
+        get_package_share_directory('mirs'),
+        'config',
+        'config.yaml'
+    )
 
     odometry_node = Node(
         package='mirs',
