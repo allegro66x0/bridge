@@ -1,0 +1,27 @@
+[INFO] [launch]: All log files can be found below /home/sawara/.ros/log/2025-10-20-15-03-03-377935-sawara-MB-4H751W11-CT-13458
+[INFO] [launch]: Default logging verbosity is set to INFO
+[WARNING] [launch_ros.actions.node]: Parameter file path is not a file: /home/sawara/mirs_ws/install/mirs/share/mirs/config/config.yaml
+[WARNING] [launch_ros.actions.node]: Parameter file path is not a file: /home/sawara/mirs_ws/install/mirs/share/mirs/config/config.yaml
+[INFO] [odometry_publisher-1]: process started with pid [13459]
+[INFO] [parameter_publisher-2]: process started with pid [13461]
+[INFO] [micro_ros_agent-3]: process started with pid [13463]
+[INFO] [sllidar_node-4]: process started with pid [13465]
+[INFO] [static_transform_publisher-5]: process started with pid [13467]
+[micro_ros_agent-3] [35m[1760940183.511534][m info     | [34mTermiosAgentLinux.cpp[m | [37minit                    [m | [32mrunning...[m             | fd: 3
+[micro_ros_agent-3] [35m[1760940183.512060][m info     | [34mRoot.cpp          [m | [37mset_verbose_level       [m | [32mlogger setup[m           | verbose_level: 6
+[static_transform_publisher-5] [WARN] [1760940183.518070097] []: Old-style arguments are deprecated; see --help for new-style arguments
+[sllidar_node-4] [INFO] [1760940183.543980581] [sllidar_node]: SLLidar running on ROS2 package SLLidar.ROS2 SDK Version:1.0.1, SLLIDAR SDK Version:2.1.0
+[static_transform_publisher-5] [INFO] [1760940183.547170925] [static_transform_publisher_Lxv0JTC0N1E0hZWp]: Spinning until stopped - publishing transform
+[static_transform_publisher-5] translation: ('0.000000', '0.000000', '0.350000')
+[static_transform_publisher-5] rotation: ('0.000000', '0.000000', '-0.706825', '0.707388')
+[static_transform_publisher-5] from 'base_link' to 'laser'
+[sllidar_node-4] [ERROR] [1760940186.045554007] [sllidar_node]: Error, operation time out. SL_RESULT_OPERATION_TIMEOUT! 
+[ERROR] [sllidar_node-4]: process has died [pid 13465, exit code 255, cmd '/home/sawara/mirs_ws/install/sllidar_ros2/lib/sllidar_ros2/sllidar_node --ros-args -r __node:=sllidar_node --params-file /tmp/launch_params_ozmuoega'].
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[static_transform_publisher-5] [INFO] [1760940207.289267769] [rclcpp]: signal_handler(signum=2)
+[odometry_publisher-1] [INFO] [1760940207.289406808] [rclcpp]: signal_handler(signum=2)
+[ERROR] [micro_ros_agent-3]: process has died [pid 13463, exit code -2, cmd '/home/sawara/mirs_ws/install/micro_ros_agent/lib/micro_ros_agent/micro_ros_agent serial --dev /dev/ttyUSB1 -v6 --ros-args -r __node:=micro_ros_agent'].
+[parameter_publisher-2] [INFO] [1760940207.289422018] [rclcpp]: signal_handler(signum=2)
+[INFO] [static_transform_publisher-5]: process has finished cleanly [pid 13467]
+[INFO] [parameter_publisher-2]: process has finished cleanly [pid 13461]
+[INFO] [odometry_publisher-1]: process has finished cleanly [pid 13459]
