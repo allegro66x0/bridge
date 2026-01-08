@@ -1,80 +1,93 @@
+import tkinter as tk
+from tkinter import messagebox
 import subprocess
 import sys
 import os
 
 # --- ユーザー設定エリア ---
-# "番号": ("メニューに表示する名前", "実行したいファイル名.py")
 models = {
-    # ↓↓ (表示名, ファイル名) の形で編集してください ↓↓
-    "1": ("AI vs AI", "tests/AIvsAI/ai_battle.py"),
-    "2": ("連珠 (Old)", "legacy/ai_v1_python/main.py"),
-    "3": ("五目並べ", "src/main.py"),
-    "4": ("五目並べ（強・C++）", "src/cpp_extension/webcam_gomoku_ai.py"),
+    "1": ("Level6", "L6/webcam_gomoku_ai.py"),
+    "2": ("Level5", "L5/main5.py"),
+    "3": ("Level4", "L4/main4.py"),
+    "4": ("Level3", "L3/main3.py"),
+    "5": ("Level2", "L2/main2.py"),
+    "6": ("Level1", "L1/main1.py"),
 }
 
-# --- プログラム本体 (ここから下は編集不要です) ---
-
-def clear_screen():
-    """コンソール画面をクリアする"""
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-def main_hub():
-    """モデル選択のハブを実行するメイン関数"""
-    
-    python_executable = sys.executable
-
-    while True:
-        clear_screen() # ★ゲーム終了後、即座にここから実行される
-        print("***********************************")
-        print("    五目並べ AI セレクションハブ")
-        print("***********************************")
-        print("\n遊びたいAIモデルの番号を入力してください：\n")
+class GomokuLauncherApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("五目並べ AI セレクションハブ")
+        self.root.attributes('-fullscreen', True)
         
-        for number, (display_name, filename) in models.items():
-            print(f"  [{number}] : {display_name}")
+        # 背景色を少しスタイリッシュに
+        self.root.configure(bg="#f0f0f0")
+
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+
+        title_label = tk.Label(
+            root, 
+            text="対戦するAIを選んでください", 
+            font=("Meiryo UI", 30, "bold"),
+            bg="#f0f0f0",
+            pady=screen_height * 0.05
+        )
+        title_label.pack()
+
+        button_frame = tk.Frame(root, bg="#f0f0f0")
+        button_frame.pack(expand=True, fill="both", padx=150, pady=20)
+
+        for key, (display_name, script_path) in models.items():
+            btn = tk.Button(
+                button_frame, 
+                text=f"{display_name}", 
+                font=("Arial", 28),
+                height=1, 
+                bg="#ffffff",
+                relief="flat", # フラットデザイン風
+                borderwidth=1,
+                command=lambda p=script_path, n=display_name: self.run_ai_model(p, n)
+            )
+            btn.pack(fill="x", pady=10)
+
+        exit_btn = tk.Button(
+            root, 
+            text="終了する", 
+            font=("Meiryo UI", 24), 
+            bg="#ffcccc", 
+            height=2,
+            relief="flat",
+            command=root.destroy
+        )
+        exit_btn.pack(fill="x", padx=150, pady=50)
+
+    def run_ai_model(self, script_path, display_name):
+        """選択されたPythonスクリプトを実行する（黒画面待機版）"""
+        python_executable = sys.executable
         
-        print("\n  [0] : ハブを終了する")
-        print("-----------------------------------")
+        if not os.path.exists(script_path):
+            messagebox.showerror("エラー", f"ファイルが見つかりません:\n{script_path}", parent=self.root)
+            return
+
+        # ★ここがポイント：画面全体を黒いフレームで覆う
+        cover_frame = tk.Frame(self.root, bg="black")
+        cover_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
         
-        choice = input("番号を入力してください: ").strip()
+        # 画面を強制更新して真っ黒にする
+        self.root.update()
 
-        if choice == "0":
-            print("\nハブを終了します。ありがとうございました。")
-            break
+        try:
+            # ★subprocess.run を使い、ゲームが終わるまで待つ
+            subprocess.run([python_executable, script_path])
+        except Exception as e:
+            messagebox.showerror("実行エラー", f"起動中にエラーが発生しました:\n{e}", parent=self.root)
+        finally:
+            # ゲームが終わったら黒いカバーを外す
+            cover_frame.destroy()
 
-        elif choice in models:
-            display_name, script_to_run = models[choice]
-            print(f"\n...『{display_name}』を起動します ...\n")
-            
-            try:
-                # 選択されたPythonスクリプトを実行
-                # ゲームが終了すると、この行の実行が完了します。
-                subprocess.run([python_executable, script_to_run], check=True)
-                
-                # ★★★ 変更点 ★★★
-                # ゲーム終了後の確認メッセージとEnterキー入力を削除しました。
-                # これにより、ループの最初（clear_screen()）に即座に戻ります。
-                #
-                # print(f"\n...『{display_name}』が終了しました。")
-                # input("Enterキーを押すと、モデル選択に戻ります...")
-                #
-                # ★★★★★★★★★★★
-
-            except FileNotFoundError:
-                print(f"!!! エラー: ファイル '{script_to_run}' が見つかりません。")
-                print("!!! `models` 辞書内のファイル名が正しいか確認してください。")
-                input("Enterキーを押して続行...") # エラー時は一時停止
-            except subprocess.CalledProcessError:
-                print(f"!!! エラー: 『{display_name}』の実行中に問題が発生しました。")
-                input("Enterキーを押して続行...") # エラー時は一時停止
-            except Exception as e:
-                print(f"!!! 予期せぬエラーが発生しました: {e}")
-                input("Enterキーを押して続行...") # エラー時は一時停止
-
-        else:
-            print(f"\n!!! 無効な選択です: '{choice}'")
-            print("!!! リストにある番号（0を含む）を入力してください。")
-            input("Enterキーを押して続行...") # 選択ミス時は一時停止
-
+# --- メイン処理 ---
 if __name__ == "__main__":
-    main_hub()
+    root = tk.Tk()
+    app = GomokuLauncherApp(root)
+    root.mainloop()

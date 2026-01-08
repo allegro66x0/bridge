@@ -1,0 +1,306 @@
+/* Global */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #1a1a1a;
+    color: white;
+    overflow: hidden;
+    /* Prevent scrolling on host */
+}
+
+/* --- Host View --- */
+#host-container {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    background: radial-gradient(circle at center, #2a2a2a 0%, #111 100%);
+}
+
+/* Board (Go Style) - Failsafe Alignment */
+#board-area {
+    width: 650px;
+    height: 650px;
+    position: relative;
+    background-color: #dcb35c;
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+    display: grid;
+    /* Strict 50px grid columns/rows */
+    grid-template-columns: repeat(13, 50px);
+    grid-template-rows: repeat(13, 50px);
+    box-sizing: content-box;
+    border: 5px solid #5d4037;
+}
+
+/* Background Grid Lines */
+#board-area::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    /* 
+       Grid Alignment Logic:
+       - Cell size: 50px. Center: 25px.
+       - Line width: 2px. Center: 1px.
+       - Target line center: 25px.
+       - Start pos: 24px.
+    */
+    background-image:
+        linear-gradient(to right, #000 2px, transparent 2px),
+        linear-gradient(to bottom, #000 2px, transparent 2px);
+
+    background-size: 50px 50px;
+    background-position: 24px 24px;
+
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Intersections (Clickable Areas) */
+.cell {
+    position: relative;
+    z-index: 1;
+    cursor: pointer;
+    width: 50px;
+    height: 50px;
+}
+
+.cell:hover::after {
+    content: "";
+    width: 30%;
+    height: 30%;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 50%;
+    position: absolute;
+    top: 35%;
+    left: 35%;
+}
+
+.cell:hover {
+    background-color: transparent;
+}
+
+/* Guest View Adjustment */
+#guest-board {
+    width: 100%;
+    max-width: 400px;
+    aspect-ratio: 1;
+    background-color: #dcb35c;
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(13, 1fr);
+    grid-template-rows: repeat(13, 1fr);
+    box-sizing: border-box;
+    border: 2px solid #5d4037;
+}
+
+/* Guest Lines */
+#guest-board::before {
+    content: "";
+    position: absolute;
+    /* 
+       Percentage Logic for Guest:
+       100% / 13 = 7.6923%. Center is 3.846%.
+       Line width ~1px.
+       Start around 3.8%?
+       Let's use background-position center logic with Calc if possible,
+       or just simple margins.
+       Safest: Just position lines to match centers.
+       background-position: 3.85% 3.85% is relative to empty space.
+       Let's Stick to the offset method:
+       background-size: 8.333% (1/12) of the inner 13-cell area?
+       No, 13 cells implies we need 13 lines.
+       repeat(13) means 100% / 13 ~ 7.69%.
+       background-size: 7.6923% ?
+    */
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    background-image:
+        linear-gradient(to right, #000 1px, transparent 1px),
+        linear-gradient(to bottom, #000 1px, transparent 1px);
+
+    background-size: 7.6923% 7.6923%;
+    /* 100/13 */
+
+    /* 
+       We need the lines centered in the bands.
+       Band width = 100/13 %. Center is 1/26 %.
+       Line is negligible.
+       background-position: calc(100% / 26) calc(100% / 26).
+    */
+    background-position: 3.846% 3.846%;
+
+    pointer-events: none;
+}
+
+.guest-cell {
+    position: relative;
+    z-index: 10;
+}
+
+.guest-cell.selected {
+    background-color: rgba(255, 0, 0, 0.6);
+    border-radius: 50%;
+    box-shadow: 0 0 10px red;
+}
+
+/* Stone/Vote Sizes */
+.stone {
+    width: 80%;
+    height: 80%;
+    top: 10%;
+    left: 10%;
+    position: absolute;
+    border-radius: 50%;
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.4);
+    z-index: 10;
+}
+
+.stone.black {
+    background: radial-gradient(at 30% 30%, #444, #000);
+}
+
+.stone.white {
+    background: radial-gradient(at 30% 30%, #fff, #ccc);
+}
+
+/* Vote Circles */
+.vote-circle {
+    position: absolute;
+    /* No wobble by default */
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 5;
+
+    /* Center anchor */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+
+    /* Smooth transitions for growth and color */
+    transition: width 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+        height 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+        background-color 0.5s ease;
+}
+
+/* Pop Animation (Added by JS on vote) */
+.vote-pop {
+    animation: popEffect 0.3s ease-out;
+}
+
+@keyframes popEffect {
+    0% {
+        transform: translate(-50%, -50%) scale(1);
+    }
+
+    50% {
+        transform: translate(-50%, -50%) scale(1.3);
+    }
+
+    100% {
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+/* Kill Log (Top Right) */
+#kill-log-container {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 350px;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.log-entry {
+    background: linear-gradient(90deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.8) 20%, rgba(0, 0, 0, 0.8) 100%);
+    color: #fff;
+    padding: 8px 15px;
+    border-radius: 4px;
+    font-size: 1.1rem;
+    font-weight: bold;
+    text-align: right;
+
+    opacity: 0;
+    transform: translateX(50px);
+    animation: slideIn 0.3s forwards, fadeOut 0.5s 4s forwards;
+
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    border-right: 4px solid #ff4444;
+}
+
+.log-entry span.user {
+    color: #ffeb3b;
+    margin-right: 10px;
+}
+
+.log-entry span.coord {
+    color: #ff4444;
+    font-family: monospace;
+}
+
+@keyframes slideIn {
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes fadeOut {
+    to {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+}
+
+/* --- Guest View --- */
+#guest-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    height: 100vh;
+    box-sizing: border-box;
+}
+
+#vote-btn {
+    margin-top: 20px;
+    padding: 15px 40px;
+    font-size: 1.5rem;
+    background-color: #ff4444;
+    color: white;
+    border: none;
+    border-radius: 50px;
+    box-shadow: 0 4px 15px rgba(255, 68, 68, 0.4);
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+#vote-btn:active {
+    transform: scale(0.95);
+}
+
+#vote-btn:disabled {
+    background-color: #555;
+    transform: none;
+}
+
+#status-msg {
+    margin-top: 20px;
+    font-size: 1.2rem;
+    color: #aaa;
+}

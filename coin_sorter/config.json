@@ -1,0 +1,8 @@
+{
+    "system_a": {
+        "cam_id": 2,
+        "com_port": "COM7",
+        "model_path": "model.pth",
+        "roi_path": "model_roi.json"
+    }
+}
