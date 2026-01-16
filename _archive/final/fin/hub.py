@@ -5,10 +5,13 @@ import sys
 import os
 
 # --- ユーザー設定エリア ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 models = {
-    "1": ("Gomoku AI (Final)", os.path.join(BASE_DIR, "L6", "webcam_gomoku_ai.py")),
+    "1": ("Level6", "L6/webcam_gomoku_ai.py"),
+    "2": ("Level5", "L5/main5.py"),
+    "3": ("Level4", "L4/main4.py"),
+    "4": ("Level3", "L3/main3.py"),
+    "5": ("Level2", "L2/main2.py"),
+    "6": ("Level1", "L1/main1.py"),
 }
 
 class GomokuLauncherApp:
@@ -48,18 +51,6 @@ class GomokuLauncherApp:
             )
             btn.pack(fill="x", pady=10)
 
-        # Settings Button (Top-Right, Square)
-        settings_btn = tk.Button(
-            root,
-            text="⚙️",
-            font=("Meiryo UI", 20),
-            bg="#e0e0e0",
-            relief="flat",
-            command=self.open_settings
-        )
-        # Place in top-right corner
-        settings_btn.place(relx=0.95, rely=0.05, anchor="ne", width=80, height=80)
-
         exit_btn = tk.Button(
             root, 
             text="終了する", 
@@ -69,22 +60,7 @@ class GomokuLauncherApp:
             relief="flat",
             command=root.destroy
         )
-        exit_btn.pack(fill="x", padx=150, pady=20)
-
-    def open_settings(self):
-        """設定画面を開く"""
-        try:
-            # hub.pyと同じ場所にある settings_ui.py を探す
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            settings_path = os.path.join(script_dir, "settings_ui.py")
-            
-            if not os.path.exists(settings_path):
-                messagebox.showerror("Error", f"Settings UI not found:\n{settings_path}")
-                return
-
-            subprocess.Popen([sys.executable, settings_path])
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to launch Settings:\n{e}")
+        exit_btn.pack(fill="x", padx=150, pady=50)
 
     def run_ai_model(self, script_path, display_name):
         """選択されたPythonスクリプトを実行する（黒画面待機版）"""

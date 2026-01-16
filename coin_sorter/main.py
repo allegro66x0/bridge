@@ -175,12 +175,23 @@ class FaderSystem:
         if self.cap.isOpened(): self.cap.release()
         if self.ser: self.ser.close()
 
+# --- Import Central Config ---
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+import config
+
 def main():
-    with open(CONFIG_PATH, 'r') as f:
-        config = json.load(f)
+    # Use Central Config
+    sorter_config = {
+        "cam_id": config.SORTER_CAM_ID,
+        "com_port": config.SERIAL_PORT_SORTER,
+        "model_path": config.SORTER_MODEL_PATH,
+        "roi_path": config.SORTER_ROI_PATH
+    }
 
     # システム初期化
-    sys_a = FaderSystem("System A", config["system_a"])
+    sys_a = FaderSystem("System A", sorter_config)
 
     print("--- Coin Sorter AI System Started ---")
     print("Keys:")

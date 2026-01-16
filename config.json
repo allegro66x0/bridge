@@ -1,0 +1,31 @@
+{
+    "SERIAL_PORT_GANTRY": "COM9",
+    "SERIAL_PORT_MAGNET": "COM10",
+    "SERIAL_PORT_SORTER": "COM7",
+    "SORTER_CAM_ID": 2,
+    "SORTER_MODEL_PATH": "model.pth",
+    "SORTER_ROI_PATH": "model_roi.json",
+    "CAMERA_INDEX": 3,
+    "SCREEN_WIDTH": 2880,
+    "SCREEN_HEIGHT": 1920,
+    "BOARD_SIZE_AI": 13,
+    "SEARCH_DEPTH": 5,
+    "FIXED_CORNER_POINTS": [
+        [
+            276,
+            234
+        ],
+        [
+            405,
+            229
+        ],
+        [
+            432,
+            376
+        ],
+        [
+            264,
+            379
+        ]
+    ]
+}

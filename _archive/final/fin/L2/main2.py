@@ -1,121 +1,12 @@
 import cv2
-import numpy as np 
+import numpy as np
+import random
 import time
-import gomoku_board_recognition as gbr
 from PIL import Image, ImageDraw, ImageFont
-import copy 
-import multiprocessing # C++スレッドのハング防止に必須
 import sys
 import os
 import ctypes
-import serial
-
-# --- Import Central Config ---
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-try:
-    import config
-except ImportError:
-    print("❌ Config not found. Using defaults.")
-    class config:
-        SERIAL_PORT_GANTRY = 'COM9'
-        SERIAL_PORT_SORTER = None
-        CAMERA_INDEX = 0
-        BOARD_SIZE_AI = 13
-        SEARCH_DEPTH = 5
-        FIXED_CORNER_POINTS = [(306, 216), (394, 213), (408, 326), (305, 314)]
-
-# --- Add src path to find hardware module ---
-sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
-from hardware.coin_sorter import CoinSorter
-
-# ===============================================================
-# Robot Control Settings
-# ===============================================================
-SERIAL_PORT_GANTRY = config.SERIAL_PORT_GANTRY 
-SERIAL_PORT_SORTER = config.SERIAL_PORT_SORTER
-BAUD_RATE = 9600
-
-ser_gantry = None
-sorter = None
-
-# Pickup ROI (Clone from old main.py)
-PICKUP_ROI = (50, 50, 60, 60) 
-
-def setup_robot_connection():
-    global ser_gantry
-    # Gantry
-    try:
-        ser_gantry = serial.Serial(SERIAL_PORT_GANTRY, BAUD_RATE, timeout=1)
-        print(f"✅ Gantry Connected: {SERIAL_PORT_GANTRY}")
-    except Exception as e:
-        print(f"❌ Gantry Connection Failed: {e}")
-    
-    # Sorter (Disabled)
-    print("ℹ️ Coin Sorter: Disabled")
-
-def send_command_to_gantry(x, y):
-    """Send XXYY command to Gantry (Converted to 1-based index)"""
-    if ser_gantry and ser_gantry.is_open:
-        # AI(0-12) -> Gantry(1-13)
-        gx = x + 1
-        gy = y + 1
-        cmd = f"{gx:02}{gy:02}\n"
-        print(f"🤖 Sending to Gantry: {cmd.strip()}")
-        ser_gantry.write(cmd.encode('utf-8'))
-        
-        # Wait for 'READY' 
-        # (Blocking wait to prevent sync issues)
-        while True:
-            if ser_gantry.in_waiting > 0:
-                line = ser_gantry.readline().decode('utf-8', errors='ignore').strip()
-                if line == "READY":
-                    print("-> Gantry Ready")
-                    print("-> Gantry Ready")
-                    break
-
-def send_home_command():
-    """Send 0000 command to return Gantry to home (Camera clear)"""
-    if ser_gantry and ser_gantry.is_open:
-        cmd = "0000\n"
-        print(f"🤖 Sending to Gantry: HOME (0000)")
-        ser_gantry.write(cmd.encode('utf-8'))
-        
-        while True:
-            if ser_gantry.in_waiting > 0:
-                line = ser_gantry.readline().decode('utf-8', errors='ignore').strip()
-                if line == "READY":
-                    print("-> Gantry Returned Home")
-                    break
-
-def check_pickup_point_and_feed(frame):
-    """Monitor pickup point and control sorter"""
-    # Sorter Disabled
-    return
-
-    if not sorter.is_connected: return
-
-    x, y, w, h = PICKUP_ROI
-    if y+h >= frame.shape[0] or x+w >= frame.shape[1]: return
-
-    roi = frame[y:y+h, x:x+w]
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    mean_val = np.mean(gray)
-    
-    # Thresholds (Adjust as needed)
-    has_stone = (mean_val < 80) or (mean_val > 180)
-    
-    if not has_stone:
-        sorter.start_all()
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
-    else:
-        sorter.stop_all()
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-
-
-# ===============================================================
-# C++モジュールの読み込み
-# ===============================================================
-# Strict import removed to allow fallback logic below
+import gomoku_board_recognition as gbr
 
 # ===============================================================
 # ★重要★ 高DPI設定 (Surfaceの解像度ズレを防止)
@@ -156,48 +47,68 @@ POS_BTN = ((SCREEN_W - BTN_W)//2, btn_y)
 
 
 # ===============================================================
-# 設定・ロジック
+# 設定・定数
 # ===============================================================
-BOARD_SIZE_AI = config.BOARD_SIZE_AI
-PLAYER, AI = 2, 1 # AI先手 
-SEARCH_DEPTH = config.SEARCH_DEPTH 
+BOARD_SIZE = 13
+AI = 1      # 黒（先手）
+PLAYER = 2  # 白（後手）
+EMPTY = 0
 
-CAM_INDEX = config.CAMERA_INDEX
-FIXED_CORNER_POINTS = config.FIXED_CORNER_POINTS
+CAM_INDEX = 2  # ★環境に合わせて変更してください (0, 1, 2など)
+FIXED_CORNER_POINTS = [(171, 58), (512, 58), (508, 406), (161, 398)]
 FONT_PATH = "C:/Windows/Fonts/meiryo.ttc"
 
-def check_win(board, x, y, player):
-    """勝利判定 (Python側で実施)"""
-    directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
-    for dx, dy in directions:
-        count = 1
-        for i in range(1, 5):
-            nx, ny = x + i * dx, y + i * dy
-            if not (0 <= nx < BOARD_SIZE_AI and 0 <= ny < BOARD_SIZE_AI and board[ny][nx] == player): break
-            count += 1
-        for i in range(1, 5):
-            nx, ny = x - i * dx, y - i * dy
-            if not (0 <= nx < BOARD_SIZE_AI and 0 <= ny < BOARD_SIZE_AI and board[ny][nx] == player): break
-            count += 1
-        if count >= 5: return True
-    return False
-
 # ===============================================================
-# C++モジュールの読み込み (失敗時はPython版AIを使用)
+# AI評価ロジック (Level 1: 接待AI)
 # ===============================================================
-ENABLE_CPP = False
-try:
-    import cpp_gomoku_ai
-    ENABLE_CPP = True
-    print("✅ C++ AIモジュール読み込み成功")
-except ImportError:
-    print("⚠️ C++ AIモジュールが見つかりません。Python版(低速)を使用します。")
-    print("   (Visual C++ Build Toolsをインストールして再構築すると高速化できます)")
+class Board:
+    def __init__(self, size=BOARD_SIZE):
+        self.size = size
+        self.grid = [[0]*size for _ in range(size)]
+    def play(self, r, c, player):
+        if self.is_empty(r, c):
+            self.grid[r][c] = player
+            return True
+        return False
+    def copy(self):
+        b = Board(self.size)
+        b.grid = [row[:] for row in self.grid]
+        return b
+    def inside(self, r, c): return 0 <= r < self.size and 0 <= c < self.size
+    def is_empty(self, r, c): return self.inside(r, c) and self.grid[r][c] == 0
+    def check_win(self, x, y, player):
+        if not self.inside(y, x): return False 
+        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            count = 1
+            for i in range(1, 5):
+                nx, ny = x + i * dx, y + i * dy
+                if not (self.inside(ny, nx) and self.grid[ny][nx] == player): break
+                count += 1
+            for i in range(1, 5):
+                nx, ny = x - i * dx, y - i * dy
+                if not (self.inside(ny, nx) and self.grid[ny][nx] == player): break
+                count += 1
+            if count >= 5: return True
+        return False
 
-# --- Python版 Minimax AI (Fallback) ---
-def evaluate_line(line, player, ai_player):
-    opponent = player if ai_player != player else (3 - player) # Assuming 1 and 2
-    if opponent in line: return 0
+def gen_moves(board, radius=2):
+    occupied = [(r,c) for r in range(board.size) for c in range(board.size) if board.grid[r][c] != 0]
+    if not occupied:
+        center = board.size // 2
+        return [(center, center)]
+    cand = set()
+    for (r0, c0) in occupied:
+        for dr in range(-radius, radius+1):
+            for dc in range(-radius, radius+1):
+                r, c = r0+dr, c0+dc
+                if board.inside(r, c) and board.grid[r][c] == 0:
+                    cand.add((r,c))
+    return list(cand)
+
+def evaluate_line(line, player):
+    opponent = PLAYER if player == AI else AI
+    if opponent in line: return 0 
     player_stones = line.count(player)
     if player_stones == 5: return 100000
     if player_stones == 4: return 1000
@@ -205,110 +116,91 @@ def evaluate_line(line, player, ai_player):
     if player_stones == 2: return 10
     return 0
 
-def count_patterns(board, player):
+def count_patterns_for_player(board_grid, player):
     score = 0
-    bs = len(board)
-    # Horizontal
-    for r in range(bs):
-        for c in range(bs - 4):
-            score += evaluate_line([board[r][c+i] for i in range(5)], player, player)
-    # Vertical
-    for c in range(bs):
-        for r in range(bs - 4):
-             score += evaluate_line([board[r+i][c] for i in range(5)], player, player)
-    # Diagonal \
-    for r in range(bs - 4):
-        for c in range(bs - 4):
-            score += evaluate_line([board[r+i][c+i] for i in range(5)], player, player)
-    # Diagonal /
-    for r in range(4, bs):
-        for c in range(bs - 4):
-            score += evaluate_line([board[r-i][c+i] for i in range(5)], player, player)
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE - 4):
+            score += evaluate_line([board_grid[r][c+i] for i in range(5)], player)
+    for c in range(BOARD_SIZE):
+        for r in range(BOARD_SIZE - 4):
+            score += evaluate_line([board_grid[r+i][c] for i in range(5)], player)
+    for r in range(BOARD_SIZE - 4):
+        for c in range(BOARD_SIZE - 4):
+            score += evaluate_line([board_grid[r+i][c+i] for i in range(5)], player)
+    for r in range(4, BOARD_SIZE):
+        for c in range(BOARD_SIZE - 4):
+            score += evaluate_line([board_grid[r-i][c+i] for i in range(5)], player)
     return score
 
-def evaluate_board(board, ai_player, human_player):
-    return count_patterns(board, ai_player) - count_patterns(board, human_player) * 1.5
+def get_score(board_grid, player):
+    opponent = PLAYER if player == AI else AI
+    return count_patterns_for_player(board_grid, player) - count_patterns_for_player(board_grid, opponent) * 1.2
 
-def get_moves(board):
-    candidates = set()
-    bs = len(board)
-    for y in range(bs):
-        for x in range(bs):
-            if board[y][x] != 0:
-                for dy in range(-2, 3):
-                    for dx in range(-2, 3):
-                        nx, ny = x + dx, y + dy
-                        if 0 <= nx < bs and 0 <= ny < bs and board[ny][nx] == 0:
-                            candidates.add((nx, ny))
-    if not candidates: return [(bs//2, bs//2)]
-    return list(candidates)
+# --- 接待AIロジック本体 ---
+def pick_move_reception_smart(board, ai_player):
+    human_player = PLAYER if ai_player == AI else AI
+    candidates = gen_moves(board, radius=2)
+    if not candidates: return None
 
-def minimax_py(board, depth, player, ai_player, human_player, alpha, beta):
-    if depth == 0: return evaluate_board(board, ai_player, human_player), None
-    moves = get_moves(board)
-    best_move = moves[0] if moves else None
+    # 1. [防衛] プレイヤーの必勝手(リーチ)を防ぐ
+    threat_moves = []
+    for (r, c) in candidates:
+        board.grid[r][c] = human_player 
+        is_dangerous = False
+        directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            count = 1
+            for i in range(1, 5):
+                nx, ny = c + i*dx, r + i*dy
+                if board.inside(ny, nx) and board.grid[ny][nx] == human_player: count += 1
+                else: break
+            for i in range(1, 5):
+                nx, ny = c - i*dx, r - i*dy
+                if board.inside(ny, nx) and board.grid[ny][nx] == human_player: count += 1
+                else: break
+            if count >= 4: 
+                is_dangerous = True
+                break
+        board.grid[r][c] = 0 
+        if is_dangerous:
+            threat_moves.append((r, c))
+
+    if threat_moves:
+        print(f"AI: プレイヤーの攻撃を検知！防衛します。")
+        return random.choice(threat_moves)
+
+    # 2. [手選び] すべての候補手を評価
+    scored_moves = []
+    for (r, c) in candidates:
+        b_copy = board.copy()
+        b_copy.play(r, c, ai_player)
+        score = get_score(b_copy.grid, ai_player)
+        scored_moves.append(((r, c), score))
     
-    if player == ai_player:
-        max_eval = -float("inf")
-        for x, y in moves:
-            board[y][x] = ai_player
-            if check_win(board, x, y, ai_player): 
-                board[y][x] = 0
-                return 1000000, (x, y)
-            eval_val, _ = minimax_py(board, depth - 1, human_player, ai_player, human_player, alpha, beta)
-            board[y][x] = 0
-            if eval_val > max_eval:
-                max_eval = eval_val
-                best_move = (x, y)
-            alpha = max(alpha, eval_val)
-            if beta <= alpha: break
-        return max_eval, best_move
+    scored_moves.sort(key=lambda x: x[1], reverse=True)
+
+    # 3. [接待フィルター] 
+    if len(scored_moves) <= 1:
+        return scored_moves[0][0]
+    
+    top_moves = scored_moves[:min(6, len(scored_moves))]
+    filtered_moves = []
+    for move, score in top_moves:
+        if score < 900: # 勝ち確の手はなるべく避ける
+            filtered_moves.append(move)
+    
+    if not filtered_moves:
+        return random.choice(candidates)
+
+    if len(filtered_moves) >= 2:
+        pick_idx = random.choice(range(len(filtered_moves)))
+        if pick_idx == 0 and len(filtered_moves) > 1 and random.random() < 0.7:
+            pick_idx = random.randint(1, len(filtered_moves)-1)
+        choice = filtered_moves[pick_idx]
+        print(f"AI: {len(scored_moves)}手の中で {pick_idx+1}番目に良さそうな手を選びました")
+        return choice
     else:
-        min_eval = float("inf")
-        for x, y in moves:
-            board[y][x] = human_player
-            if check_win(board, x, y, human_player): 
-                 board[y][x] = 0
-                 return -1000000, (x, y)
-            eval_val, _ = minimax_py(board, depth - 1, ai_player, ai_player, human_player, alpha, beta)
-            board[y][x] = 0
-            if eval_val < min_eval:
-                min_eval = eval_val
-                best_move = (x, y)
-            beta = min(beta, eval_val)
-            if beta <= alpha: break
-        return min_eval, best_move
-
-def find_best_move_parallel(board_np, depth):
-    """C++エンジン または Python Fallback を使用"""
-    # 2=Player, 1=AI (Assuming global constants)
-    AI_ID = 1
-    PLAYER_ID = 2
-    
-    start_time = time.time()
-    
-    if ENABLE_CPP:
-        # C++に渡すためにint32型に変換
-        board_for_cpp = board_np.astype(np.int32)
-        move_tuple = cpp_gomoku_ai.find_best_move(board_for_cpp, depth)
-        best_x, best_y = move_tuple[0], move_tuple[1]
-        print(f"[C++ AI] Time: {time.time() - start_time:.4f}s (Depth: {depth})")
-        return 99999, (best_x, best_y)
-    else:
-        # Python Fallback (Depth reduced for speed)
-        py_depth = 2 # Force shallow search for speed
-        board_list = board_np.tolist()
-        _, move = minimax_py(board_list, py_depth, AI_ID, AI_ID, PLAYER_ID, -float('inf'), float('inf'))
-        print(f"[Python AI] Time: {time.time() - start_time:.4f}s (Depth: {py_depth}) - C++Unavailable")
-        return 99999, move
-
-def convert_discs_to_ai_board(confirmed_discs):
-    new_board = np.zeros((BOARD_SIZE_AI, BOARD_SIZE_AI), dtype=np.int32) 
-    for d in confirmed_discs:
-        row, col = d.cell
-        if 0 <= row < BOARD_SIZE_AI and 0 <= col < BOARD_SIZE_AI:
-            new_board[row][col] = AI if d.color == gbr.DiscColor.BLACK else PLAYER
-    return new_board
+        return filtered_moves[0]
 
 
 # ===============================================================
@@ -361,7 +253,6 @@ def update_buttons_layout():
     current_active_buttons.append(quit_btn)
 
 def on_mouse_click_unified(event, x, y, flags, param):
-    """マウスクリックイベント"""
     global last_clicked_command
     if event == cv2.EVENT_LBUTTONDOWN:
         ix, iy = POS_BTN
@@ -425,14 +316,14 @@ def draw_message_panel(display_hand_warning):
 
 def calculate_grid_points(points):
     src_pts = np.array(points, dtype=np.float32)
-    side_length = (BOARD_SIZE_AI - 1) * 40
+    side_length = (BOARD_SIZE - 1) * 40
     dst_pts = np.array([[0,0], [side_length,0], [side_length,side_length], [0,side_length]], dtype=np.float32)
     M = cv2.getPerspectiveTransform(dst_pts, src_pts)
-    ideal_grid_points = [[c * 40, r * 40] for r in range(BOARD_SIZE_AI) for c in range(BOARD_SIZE_AI)]
+    ideal_grid_points = [[c * 40, r * 40] for r in range(BOARD_SIZE) for c in range(BOARD_SIZE)]
     real_grid_points_np = cv2.perspectiveTransform(np.array([ideal_grid_points], dtype=np.float32), M)
     final_intersections, final_intersection_map, idx = [], {}, 0
-    for r in range(BOARD_SIZE_AI):
-        for c in range(BOARD_SIZE_AI):
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE):
             point = (int(real_grid_points_np[0][idx][0]), int(real_grid_points_np[0][idx][1]))
             final_intersections.append(point); final_intersection_map[point] = (r, c); idx += 1
     return final_intersections, final_intersection_map
@@ -452,13 +343,23 @@ def detect_discs_on_frame(bg_frame, curr_frame, intersection_map):
     return newly_found
 
 def draw_board_ui(board_size, cell_size):
-    margin = cell_size; grid_size = cell_size * (board_size-1); img_size = grid_size + margin*2
+    margin = cell_size
+    grid_size = cell_size * (board_size-1)
+    img_size = grid_size + margin*2
     board_img = np.full((img_size, img_size, 3), (218, 179, 125), dtype=np.uint8)
     for i in range(board_size):
         pos = margin + i * cell_size
         cv2.line(board_img, (pos, margin), (pos, margin + grid_size), (0,0,0), 2)
         cv2.line(board_img, (margin, pos), (margin + grid_size, pos), (0,0,0), 2)
     return board_img
+
+def convert_discs_to_board_obj(confirmed_discs):
+    b = Board(BOARD_SIZE)
+    for d in confirmed_discs:
+        r, c = d.cell
+        if b.inside(r, c):
+            b.grid[r][c] = AI if d.color == gbr.DiscColor.BLACK else PLAYER
+    return b
 
 def create_unified_view(live_img, result_img, msg_img, btn_img):
     canvas = np.zeros((SCREEN_H, SCREEN_W, 3), dtype=np.uint8)
@@ -491,18 +392,15 @@ def create_unified_view(live_img, result_img, msg_img, btn_img):
 
     return canvas
 
-
 # ===============================================================
 # メインループ
 # ===============================================================
-def main_loop():
+def main():
     global background_frame, latest_board_ui, saved_intersections, intersection_map
     global confirmed_discs, game_over, winner, recovery_mode
     global game_started
     global ui_message_line1, ui_message_line2, ui_message_line3
     global last_clicked_command
-
-    setup_robot_connection()  # <--- Connect to Robots
 
     cap = cv2.VideoCapture(CAM_INDEX)
     if not cap.isOpened(): print(f"❌ カメラ({CAM_INDEX})起動失敗"); exit()
@@ -513,7 +411,7 @@ def main_loop():
     cv2.setWindowProperty("MainGame", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.setMouseCallback("MainGame", on_mouse_click_unified)
 
-    latest_board_ui = draw_board_ui(BOARD_SIZE_AI, 40)
+    latest_board_ui = draw_board_ui(BOARD_SIZE, 40)
 
     while True:
         update_buttons_layout()
@@ -544,26 +442,10 @@ def main_loop():
             for point in saved_intersections:
                 cv2.circle(display_frame, point, 5, (0, 255, 0), -1)
 
-        # ★ Sorter Logic
-        check_pickup_point_and_feed(display_frame)
-
         # 's' (Start)
         if command == 's' and not game_started:
-            ui_message_line1 = "ガントリーを退避中..."
-            # 画面更新してメッセージを表示させるためのウェイト
-            msg_img = draw_message_panel(display_hand_warning)
-            combined = create_unified_view(display_frame, latest_board_ui, msg_img, None)
-            cv2.imshow("MainGame", combined)
-            cv2.waitKey(1)
-
-            # ガントリー退避 (カメラ視野確保)
-            send_home_command()
-            
-            # 退避後のフレームを少し待ってから取得 (振動収まり待ち)
-            time.sleep(0.5)
-            ret, frame = cap.read() # 最新フレームを取得し直す
             background_frame = frame.copy()
-            latest_board_ui = draw_board_ui(BOARD_SIZE_AI, 40)
+            latest_board_ui = draw_board_ui(BOARD_SIZE, 40)
             ui_message_line1 = "背景を記憶。AI(黒)の初手を思考中です..."
             ui_message_line2 = "お待ちください..."
             ui_message_line3 = ""
@@ -574,29 +456,27 @@ def main_loop():
             cv2.imshow("MainGame", combined)
             cv2.waitKey(1)
 
-            # C++ AIの初手計算
-            current_ai_board = convert_discs_to_ai_board(confirmed_discs)
-            _, ai_next_move = find_best_move_parallel(current_ai_board, SEARCH_DEPTH)
+            current_board = convert_discs_to_board_obj(confirmed_discs)
+            # Level 1 ロジック呼び出し
+            move = pick_move_reception_smart(current_board, AI)
             
-            r, c = ai_next_move[1], ai_next_move[0] 
-            print(f"{c:02d}{r:02d}")
-            
-            # ★ Send to Gantry
-            send_command_to_gantry(c, r)
-
-            new_disc = gbr.Disc(); new_disc.color = gbr.DiscColor.BLACK; new_disc.cell = (r, c)
-            confirmed_discs.append(new_disc)
-            
-            color = (10,10,10)
-            cv2.circle(latest_board_ui, (40 + c*40, 40 + r*40), 18, color, -1)
-            overlay = latest_board_ui.copy()
-            cv2.circle(overlay, (40 + c*40, 40 + r*40), 16, (0,255,0), -1)
-            latest_board_ui = cv2.addWeighted(overlay, 0.5, latest_board_ui, 0.5, 0)
-            
-            ui_message_line1 = "AIが緑の円に(黒を)打ちました。"
-            ui_message_line2 = "あなたの番(白)です。"
-            ui_message_line3 = "白石を置いて「決定」ボタンを押してください。"
-            game_started = True 
+            if move:
+                r, c = move
+                print(f"{c:02d}{r:02d}")
+                
+                new_disc = gbr.Disc(); new_disc.color = gbr.DiscColor.BLACK; new_disc.cell = (r, c)
+                confirmed_discs.append(new_disc)
+                
+                color = (10,10,10)
+                cv2.circle(latest_board_ui, (40 + c*40, 40 + r*40), 18, color, -1)
+                overlay = latest_board_ui.copy()
+                cv2.circle(overlay, (40 + c*40, 40 + r*40), 16, (0,255,0), -1)
+                latest_board_ui = cv2.addWeighted(overlay, 0.5, latest_board_ui, 0.5, 0)
+                
+                ui_message_line1 = "AIが緑の円に(黒を)打ちました。"
+                ui_message_line2 = "あなたの番(白)です。"
+                ui_message_line3 = "白石を置いて「決定」ボタンを押してください。"
+                game_started = True 
 
         # 'n' (Next)
         if command == 'n' and background_frame is not None and not game_over and game_started and not recovery_mode:
@@ -613,12 +493,12 @@ def main_loop():
                 if is_correct_color:
                     confirmed_discs.append(new_disc)
                     y_idx, x_idx = new_disc.cell
-                    last_player = AI if new_disc.color == gbr.DiscColor.BLACK else PLAYER
                     
-                    current_ai_board = convert_discs_to_ai_board(confirmed_discs)
-                    if check_win(current_ai_board, x_idx, y_idx, last_player): game_over, winner = True, last_player
+                    current_board = convert_discs_to_board_obj(confirmed_discs)
+                    if current_board.check_win(x_idx, y_idx, PLAYER): 
+                        game_over, winner = True, PLAYER
                     
-                    board_ui_img = draw_board_ui(BOARD_SIZE_AI, 40)
+                    board_ui_img = draw_board_ui(BOARD_SIZE, 40)
                     for d in confirmed_discs:
                         r, c = d.cell; color = (10,10,10) if d.color == gbr.DiscColor.BLACK else (245,245,245)
                         cv2.circle(board_ui_img, (40 + c*40, 40 + r*40), 18, color, -1)
@@ -638,23 +518,22 @@ def main_loop():
                         cv2.imshow("MainGame", combined)
                         cv2.waitKey(1)
 
-                        # C++ AIの思考
-                        current_ai_board = convert_discs_to_ai_board(confirmed_discs)
-                        _, ai_next_move = find_best_move_parallel(current_ai_board, SEARCH_DEPTH)
+                        current_board = convert_discs_to_board_obj(confirmed_discs)
+                        # Level 1 ロジック呼び出し
+                        move = pick_move_reception_smart(current_board, AI)
+                        if move:
+                             ai_next_move = move
                     
                     if ai_next_move:
-                        r, c = ai_next_move[1], ai_next_move[0]
+                        r, c = ai_next_move
                         print(f"{c:02d}{r:02d}")
-                        
-                        # ★ Send to Gantry
-                        send_command_to_gantry(c, r)
-
                         new_ai_disc = gbr.Disc(); new_ai_disc.color = gbr.DiscColor.BLACK; new_ai_disc.cell = (r, c)
                         confirmed_discs.append(new_ai_disc)
                         cv2.circle(board_ui_img, (40 + c*40, 40 + r*40), 18, (10,10,10), -1)
 
-                        current_ai_board = convert_discs_to_ai_board(confirmed_discs)
-                        if check_win(current_ai_board, c, r, AI): game_over, winner = True, AI
+                        current_board = convert_discs_to_board_obj(confirmed_discs)
+                        if current_board.check_win(c, r, AI): 
+                            game_over, winner = True, AI
                         
                         overlay = board_ui_img.copy()
                         cv2.circle(overlay, (40 + c*40, 40 + r*40), 16, (0,255,0), -1)
@@ -687,10 +566,10 @@ def main_loop():
                     if not game_over: background_frame = frame.copy()
                 else:
                     if is_player_turn:
-                        ui_message_line1 = "エラー：白の番です。"
-                        ui_message_line2 = "白石を置いてください。"
+                        ui_message_line1 = "エラー：白の番です。白石を置いてください。"
                     else:
                         ui_message_line1 = "エラー：AIの番です。"
+                    ui_message_line2 = ""
                     ui_message_line3 = ""
             
             elif len(newly_found_discs) > 1:
@@ -710,7 +589,7 @@ def main_loop():
         # 'r' (Reset)
         if command == 'r':
             background_frame, confirmed_discs = None, []
-            latest_board_ui = draw_board_ui(BOARD_SIZE_AI, 40)
+            latest_board_ui = draw_board_ui(BOARD_SIZE, 40)
             game_over, recovery_mode = False, False
             winner = None
             game_started = False 
@@ -726,6 +605,5 @@ def main_loop():
     cap.release()
     cv2.destroyAllWindows()
 
-if __name__ == '__main__':
-    multiprocessing.freeze_support()
-    main_loop()
+if __name__ == "__main__":
+    main()

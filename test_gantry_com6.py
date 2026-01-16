@@ -1,7 +1,9 @@
 import serial
 import time
 
-PORT = 'COM6'
+import config
+
+PORT = config.SERIAL_PORT_GANTRY
 BAUDRATE = 9600
 
 def main():

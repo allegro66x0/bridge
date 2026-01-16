@@ -8,114 +8,18 @@ import multiprocessing # C++スレッドのハング防止に必須
 import sys
 import os
 import ctypes
-import serial
-
-# --- Import Central Config ---
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-try:
-    import config
-except ImportError:
-    print("❌ Config not found. Using defaults.")
-    class config:
-        SERIAL_PORT_GANTRY = 'COM9'
-        SERIAL_PORT_SORTER = None
-        CAMERA_INDEX = 0
-        BOARD_SIZE_AI = 13
-        SEARCH_DEPTH = 5
-        FIXED_CORNER_POINTS = [(306, 216), (394, 213), (408, 326), (305, 314)]
-
-# --- Add src path to find hardware module ---
-sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
-from hardware.coin_sorter import CoinSorter
-
-# ===============================================================
-# Robot Control Settings
-# ===============================================================
-SERIAL_PORT_GANTRY = config.SERIAL_PORT_GANTRY 
-SERIAL_PORT_SORTER = config.SERIAL_PORT_SORTER
-BAUD_RATE = 9600
-
-ser_gantry = None
-sorter = None
-
-# Pickup ROI (Clone from old main.py)
-PICKUP_ROI = (50, 50, 60, 60) 
-
-def setup_robot_connection():
-    global ser_gantry
-    # Gantry
-    try:
-        ser_gantry = serial.Serial(SERIAL_PORT_GANTRY, BAUD_RATE, timeout=1)
-        print(f"✅ Gantry Connected: {SERIAL_PORT_GANTRY}")
-    except Exception as e:
-        print(f"❌ Gantry Connection Failed: {e}")
-    
-    # Sorter (Disabled)
-    print("ℹ️ Coin Sorter: Disabled")
-
-def send_command_to_gantry(x, y):
-    """Send XXYY command to Gantry (Converted to 1-based index)"""
-    if ser_gantry and ser_gantry.is_open:
-        # AI(0-12) -> Gantry(1-13)
-        gx = x + 1
-        gy = y + 1
-        cmd = f"{gx:02}{gy:02}\n"
-        print(f"🤖 Sending to Gantry: {cmd.strip()}")
-        ser_gantry.write(cmd.encode('utf-8'))
-        
-        # Wait for 'READY' 
-        # (Blocking wait to prevent sync issues)
-        while True:
-            if ser_gantry.in_waiting > 0:
-                line = ser_gantry.readline().decode('utf-8', errors='ignore').strip()
-                if line == "READY":
-                    print("-> Gantry Ready")
-                    print("-> Gantry Ready")
-                    break
-
-def send_home_command():
-    """Send 0000 command to return Gantry to home (Camera clear)"""
-    if ser_gantry and ser_gantry.is_open:
-        cmd = "0000\n"
-        print(f"🤖 Sending to Gantry: HOME (0000)")
-        ser_gantry.write(cmd.encode('utf-8'))
-        
-        while True:
-            if ser_gantry.in_waiting > 0:
-                line = ser_gantry.readline().decode('utf-8', errors='ignore').strip()
-                if line == "READY":
-                    print("-> Gantry Returned Home")
-                    break
-
-def check_pickup_point_and_feed(frame):
-    """Monitor pickup point and control sorter"""
-    # Sorter Disabled
-    return
-
-    if not sorter.is_connected: return
-
-    x, y, w, h = PICKUP_ROI
-    if y+h >= frame.shape[0] or x+w >= frame.shape[1]: return
-
-    roi = frame[y:y+h, x:x+w]
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    mean_val = np.mean(gray)
-    
-    # Thresholds (Adjust as needed)
-    has_stone = (mean_val < 80) or (mean_val > 180)
-    
-    if not has_stone:
-        sorter.start_all()
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
-    else:
-        sorter.stop_all()
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-
 
 # ===============================================================
 # C++モジュールの読み込み
 # ===============================================================
-# Strict import removed to allow fallback logic below
+try:
+    import cpp_gomoku_ai
+except ImportError:
+    print("="*50)
+    print("エラー: C++ AIモジュール (cpp_gomoku_ai.pyd) が見つかりません。")
+    print("py setup.py build_ext --inplace を実行しましたか？")
+    print("="*50)
+    exit()
 
 # ===============================================================
 # ★重要★ 高DPI設定 (Surfaceの解像度ズレを防止)
@@ -158,12 +62,12 @@ POS_BTN = ((SCREEN_W - BTN_W)//2, btn_y)
 # ===============================================================
 # 設定・ロジック
 # ===============================================================
-BOARD_SIZE_AI = config.BOARD_SIZE_AI
+BOARD_SIZE_AI = 13
 PLAYER, AI = 2, 1 # AI先手 
-SEARCH_DEPTH = config.SEARCH_DEPTH 
+SEARCH_DEPTH = 5 
 
-CAM_INDEX = config.CAMERA_INDEX
-FIXED_CORNER_POINTS = config.FIXED_CORNER_POINTS
+CAM_INDEX = 2  # ★環境に合わせて変更してください
+FIXED_CORNER_POINTS = [(171, 58), (512, 58), (508, 406), (161, 398)]
 FONT_PATH = "C:/Windows/Fonts/meiryo.ttc"
 
 def check_win(board, x, y, player):
@@ -182,125 +86,18 @@ def check_win(board, x, y, player):
         if count >= 5: return True
     return False
 
-# ===============================================================
-# C++モジュールの読み込み (失敗時はPython版AIを使用)
-# ===============================================================
-ENABLE_CPP = False
-try:
-    import cpp_gomoku_ai
-    ENABLE_CPP = True
-    print("✅ C++ AIモジュール読み込み成功")
-except ImportError:
-    print("⚠️ C++ AIモジュールが見つかりません。Python版(低速)を使用します。")
-    print("   (Visual C++ Build Toolsをインストールして再構築すると高速化できます)")
-
-# --- Python版 Minimax AI (Fallback) ---
-def evaluate_line(line, player, ai_player):
-    opponent = player if ai_player != player else (3 - player) # Assuming 1 and 2
-    if opponent in line: return 0
-    player_stones = line.count(player)
-    if player_stones == 5: return 100000
-    if player_stones == 4: return 1000
-    if player_stones == 3: return 100
-    if player_stones == 2: return 10
-    return 0
-
-def count_patterns(board, player):
-    score = 0
-    bs = len(board)
-    # Horizontal
-    for r in range(bs):
-        for c in range(bs - 4):
-            score += evaluate_line([board[r][c+i] for i in range(5)], player, player)
-    # Vertical
-    for c in range(bs):
-        for r in range(bs - 4):
-             score += evaluate_line([board[r+i][c] for i in range(5)], player, player)
-    # Diagonal \
-    for r in range(bs - 4):
-        for c in range(bs - 4):
-            score += evaluate_line([board[r+i][c+i] for i in range(5)], player, player)
-    # Diagonal /
-    for r in range(4, bs):
-        for c in range(bs - 4):
-            score += evaluate_line([board[r-i][c+i] for i in range(5)], player, player)
-    return score
-
-def evaluate_board(board, ai_player, human_player):
-    return count_patterns(board, ai_player) - count_patterns(board, human_player) * 1.5
-
-def get_moves(board):
-    candidates = set()
-    bs = len(board)
-    for y in range(bs):
-        for x in range(bs):
-            if board[y][x] != 0:
-                for dy in range(-2, 3):
-                    for dx in range(-2, 3):
-                        nx, ny = x + dx, y + dy
-                        if 0 <= nx < bs and 0 <= ny < bs and board[ny][nx] == 0:
-                            candidates.add((nx, ny))
-    if not candidates: return [(bs//2, bs//2)]
-    return list(candidates)
-
-def minimax_py(board, depth, player, ai_player, human_player, alpha, beta):
-    if depth == 0: return evaluate_board(board, ai_player, human_player), None
-    moves = get_moves(board)
-    best_move = moves[0] if moves else None
-    
-    if player == ai_player:
-        max_eval = -float("inf")
-        for x, y in moves:
-            board[y][x] = ai_player
-            if check_win(board, x, y, ai_player): 
-                board[y][x] = 0
-                return 1000000, (x, y)
-            eval_val, _ = minimax_py(board, depth - 1, human_player, ai_player, human_player, alpha, beta)
-            board[y][x] = 0
-            if eval_val > max_eval:
-                max_eval = eval_val
-                best_move = (x, y)
-            alpha = max(alpha, eval_val)
-            if beta <= alpha: break
-        return max_eval, best_move
-    else:
-        min_eval = float("inf")
-        for x, y in moves:
-            board[y][x] = human_player
-            if check_win(board, x, y, human_player): 
-                 board[y][x] = 0
-                 return -1000000, (x, y)
-            eval_val, _ = minimax_py(board, depth - 1, ai_player, ai_player, human_player, alpha, beta)
-            board[y][x] = 0
-            if eval_val < min_eval:
-                min_eval = eval_val
-                best_move = (x, y)
-            beta = min(beta, eval_val)
-            if beta <= alpha: break
-        return min_eval, best_move
-
 def find_best_move_parallel(board_np, depth):
-    """C++エンジン または Python Fallback を使用"""
-    # 2=Player, 1=AI (Assuming global constants)
-    AI_ID = 1
-    PLAYER_ID = 2
+    """C++エンジンを呼び出して最善手を取得"""
+    # C++に渡すためにint32型に変換
+    board_for_cpp = board_np.astype(np.int32)
     
     start_time = time.time()
+    # ★C++関数の呼び出し
+    move_tuple = cpp_gomoku_ai.find_best_move(board_for_cpp, depth)
+    end_time = time.time()
     
-    if ENABLE_CPP:
-        # C++に渡すためにint32型に変換
-        board_for_cpp = board_np.astype(np.int32)
-        move_tuple = cpp_gomoku_ai.find_best_move(board_for_cpp, depth)
-        best_x, best_y = move_tuple[0], move_tuple[1]
-        print(f"[C++ AI] Time: {time.time() - start_time:.4f}s (Depth: {depth})")
-        return 99999, (best_x, best_y)
-    else:
-        # Python Fallback (Depth reduced for speed)
-        py_depth = 2 # Force shallow search for speed
-        board_list = board_np.tolist()
-        _, move = minimax_py(board_list, py_depth, AI_ID, AI_ID, PLAYER_ID, -float('inf'), float('inf'))
-        print(f"[Python AI] Time: {time.time() - start_time:.4f}s (Depth: {py_depth}) - C++Unavailable")
-        return 99999, move
+    print(f"[C++ AI] 思考時間: {end_time - start_time:.4f}秒 (探索深度: {depth})")
+    return 99999, (move_tuple[0], move_tuple[1])
 
 def convert_discs_to_ai_board(confirmed_discs):
     new_board = np.zeros((BOARD_SIZE_AI, BOARD_SIZE_AI), dtype=np.int32) 
@@ -502,8 +299,6 @@ def main_loop():
     global ui_message_line1, ui_message_line2, ui_message_line3
     global last_clicked_command
 
-    setup_robot_connection()  # <--- Connect to Robots
-
     cap = cv2.VideoCapture(CAM_INDEX)
     if not cap.isOpened(): print(f"❌ カメラ({CAM_INDEX})起動失敗"); exit()
 
@@ -544,24 +339,8 @@ def main_loop():
             for point in saved_intersections:
                 cv2.circle(display_frame, point, 5, (0, 255, 0), -1)
 
-        # ★ Sorter Logic
-        check_pickup_point_and_feed(display_frame)
-
         # 's' (Start)
         if command == 's' and not game_started:
-            ui_message_line1 = "ガントリーを退避中..."
-            # 画面更新してメッセージを表示させるためのウェイト
-            msg_img = draw_message_panel(display_hand_warning)
-            combined = create_unified_view(display_frame, latest_board_ui, msg_img, None)
-            cv2.imshow("MainGame", combined)
-            cv2.waitKey(1)
-
-            # ガントリー退避 (カメラ視野確保)
-            send_home_command()
-            
-            # 退避後のフレームを少し待ってから取得 (振動収まり待ち)
-            time.sleep(0.5)
-            ret, frame = cap.read() # 最新フレームを取得し直す
             background_frame = frame.copy()
             latest_board_ui = draw_board_ui(BOARD_SIZE_AI, 40)
             ui_message_line1 = "背景を記憶。AI(黒)の初手を思考中です..."
@@ -581,9 +360,6 @@ def main_loop():
             r, c = ai_next_move[1], ai_next_move[0] 
             print(f"{c:02d}{r:02d}")
             
-            # ★ Send to Gantry
-            send_command_to_gantry(c, r)
-
             new_disc = gbr.Disc(); new_disc.color = gbr.DiscColor.BLACK; new_disc.cell = (r, c)
             confirmed_discs.append(new_disc)
             
@@ -645,10 +421,6 @@ def main_loop():
                     if ai_next_move:
                         r, c = ai_next_move[1], ai_next_move[0]
                         print(f"{c:02d}{r:02d}")
-                        
-                        # ★ Send to Gantry
-                        send_command_to_gantry(c, r)
-
                         new_ai_disc = gbr.Disc(); new_ai_disc.color = gbr.DiscColor.BLACK; new_ai_disc.cell = (r, c)
                         confirmed_discs.append(new_ai_disc)
                         cv2.circle(board_ui_img, (40 + c*40, 40 + r*40), 18, (10,10,10), -1)

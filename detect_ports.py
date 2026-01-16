@@ -45,7 +45,10 @@ def check_port(port):
 
 def main():
     detected = {}
-    candidates = ['COM4', 'COM5', 'COM6']
+    import config
+    candidates = ['COM4', 'COM5', 'COM6', 'COM9', config.SERIAL_PORT_GANTRY]
+    if config.SERIAL_PORT_SORTER:
+        candidates.append(config.SERIAL_PORT_SORTER)
     
     for port in candidates:
         result = check_port(port)
