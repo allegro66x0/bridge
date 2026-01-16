@@ -8,15 +8,18 @@ import cv2
 import subprocess
 import sys
 
+
 CONFIG_FILE = "config.json"
+DEVICE_CACHE_FILE = "device_cache.json"
 
 class SettingsApp:
     def __init__(self, root):
         self.root = root
         self.root.title("System Settings")
-        self.root.geometry("600x700")
+        self.root.geometry("700x700") # 少し横幅を広げる
 
         self.config = self.load_config()
+        self.device_cache = self.load_device_cache() # Load cache
 
         # Styles
         style = ttk.Style()
@@ -38,20 +41,20 @@ class SettingsApp:
         self.sorter_port = self.create_port_selector("Sorter Port:", 
                                                      self.config.get("SERIAL_PORT_SORTER", "COM7"), 4)
         
-        self.sorter_cam = self.create_cam_entry("Sorter Camera ID:", 
+        self.sorter_cam = self.create_cam_selector("Sorter Camera ID:", 
                                             self.config.get("SORTER_CAM_ID", 2), 5)
 
         # --- Main Camera Settings ---
         self.create_section("Main Camera (Game AI)", 6)
         
-        self.main_cam = self.create_cam_entry("Main Camera ID:", 
+        self.main_cam = self.create_cam_selector("Main Camera ID:", 
                                           self.config.get("CAMERA_INDEX", 0), 7)
 
         # --- Calibration Buttons ---
         self.create_section("Calibration Tools", 8)
         
         btn_frame = tk.Frame(self.root)
-        btn_frame.grid(row=9, column=0, columnspan=2, pady=5, sticky="ew", padx=20)
+        btn_frame.grid(row=9, column=0, columnspan=4, pady=5, sticky="ew", padx=20)
         
         btn_calib_board = ttk.Button(btn_frame, text="Board (Game) Calibration", command=self.run_board_calibration)
         btn_calib_board.pack(side="left", expand=True, fill="x", padx=5)
@@ -62,45 +65,68 @@ class SettingsApp:
         # --- Save Button ---
         btn_save = tk.Button(self.root, text="SAVE SETTINGS", bg="#4CAF50", fg="white", 
                              font=("Arial", 14, "bold"), command=self.save_config)
-        btn_save.grid(row=10, column=0, columnspan=2, pady=30, sticky="ew", padx=50)
+        btn_save.grid(row=10, column=0, columnspan=4, pady=30, sticky="ew", padx=50)
+
+    def load_device_cache(self):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        cache_path = os.path.join(script_dir, DEVICE_CACHE_FILE)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        return {"cameras": [], "serial_ports": []}
 
     def create_section(self, title, row):
         lbl = tk.Label(self.root, text=title, font=("Arial", 14, "bold", "underline"), pady=10)
-        lbl.grid(row=row, column=0, columnspan=2, sticky="w", padx=10)
+        lbl.grid(row=row, column=0, columnspan=4, sticky="w", padx=10)
 
     def create_port_selector(self, label_text, default_val, row):
         lbl = ttk.Label(self.root, text=label_text)
         lbl.grid(row=row, column=0, sticky="e", padx=10)
         
-        combo = ttk.Combobox(self.root, values=self.get_active_ports(), width=20)
+        # Use cache if available, otherwise scan (or 'Error' if empty)
+        cached_ports = self.device_cache.get("serial_ports", [])
+        if not cached_ports: cached_ports = self.get_active_ports() # Fallback
+
+        combo = ttk.Combobox(self.root, values=cached_ports, width=20)
         combo.set(default_val)
         combo.grid(row=row, column=1, sticky="w", padx=10)
         
-        # Refresh Button
+        # Refresh Button (Force Scan) - Placed in column 3
         btn = ttk.Button(self.root, text="↻", width=3, 
                          command=lambda: combo.config(values=self.get_active_ports()))
-        btn.grid(row=row, column=1, sticky="e", padx=(180, 0))
+        btn.grid(row=row, column=3, sticky="w", padx=5)
         
         return combo
 
-    def create_cam_entry(self, label_text, default_val, row):
+    def create_cam_selector(self, label_text, default_val, row):
         lbl = ttk.Label(self.root, text=label_text)
         lbl.grid(row=row, column=0, sticky="e", padx=10)
         
-        entry = ttk.Entry(self.root, width=23)
-        entry.insert(0, str(default_val))
-        entry.grid(row=row, column=1, sticky="w", padx=10)
+        # Use cache
+        cached_cams = self.device_cache.get("cameras", [])
         
-        # Preview Button
-        btn = ttk.Button(self.root, text="👁 Preview", width=10, 
-                         command=lambda: self.preview_camera(entry.get()))
-        btn.grid(row=row, column=1, sticky="e", padx=(160, 0))
+        combo = ttk.Combobox(self.root, values=cached_cams, width=20)
+        combo.set(default_val)
+        combo.grid(row=row, column=1, sticky="w", padx=10)
         
-        return entry
+        # Preview Button - Placed in column 2
+        btn_preview = ttk.Button(self.root, text="👁 Preview", width=10, 
+                         command=lambda: self.preview_camera(combo.get()))
+        btn_preview.grid(row=row, column=2, sticky="w", padx=5)
+
+        # Refresh Button (Force Scan) - Placed in column 3
+        btn_refresh = ttk.Button(self.root, text="↻", width=3, 
+                         command=lambda: combo.config(values=self.get_available_cameras()))
+        btn_refresh.grid(row=row, column=3, sticky="w", padx=5)
+        
+        return combo
 
     def preview_camera(self, cam_id_str):
         try:
-            cam_id = int(cam_id_str)
+            cam_id = int(str(cam_id_str).split(" ")[0]) if " " in str(cam_id_str) else int(cam_id_str)
         except ValueError:
             messagebox.showerror("Error", "Invalid Camera ID")
             return
@@ -109,8 +135,7 @@ class SettingsApp:
         
         # Open Camera
         cap = cv2.VideoCapture(cam_id, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-             cap = cv2.VideoCapture(cam_id)
+        if not cap.isOpened(): cap = cv2.VideoCapture(cam_id)
         
         if not cap.isOpened():
             messagebox.showerror("Error", f"Could not open Camera {cam_id}")
@@ -121,13 +146,10 @@ class SettingsApp:
 
         while True:
             ret, frame = cap.read()
-            if not ret:
-                break
+            if not ret: break
             
-            # Draw Instruction
             cv2.putText(frame, "Press 'q' or 'ESC' to close", (20, 40), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            
             cv2.imshow(win_name, frame)
             
             key = cv2.waitKey(20) & 0xFF
@@ -144,6 +166,18 @@ class SettingsApp:
         except:
             return ["Error"]
 
+    def get_available_cameras(self):
+        """Available Cameras (Indices 0-9) - Heavy Operation"""
+        available_cams = []
+        for i in range(10):
+            cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+            if cap.isOpened():
+                available_cams.append(i); cap.release()
+            else:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened(): available_cams.append(i); cap.release()
+        return available_cams
+
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
             try:
@@ -158,8 +192,18 @@ class SettingsApp:
         new_config["SERIAL_PORT_GANTRY"] = self.gantry_port.get()
         new_config["SERIAL_PORT_MAGNET"] = self.magnet_port.get()
         new_config["SERIAL_PORT_SORTER"] = self.sorter_port.get()
-        new_config["SORTER_CAM_ID"] = int(self.sorter_cam.get())
-        new_config["CAMERA_INDEX"] = int(self.main_cam.get())
+        
+        def parse_int(val):
+            try:
+                # Handle "1 (Vendor Name)" -> 1
+                if " " in str(val):
+                    return int(str(val).split(" ")[0])
+                return int(val)
+            except:
+                return 0
+
+        new_config["SORTER_CAM_ID"] = parse_int(self.sorter_cam.get())
+        new_config["CAMERA_INDEX"] = parse_int(self.main_cam.get())
         
         try:
             with open(CONFIG_FILE, 'w') as f:
