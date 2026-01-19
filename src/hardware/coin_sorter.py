@@ -55,6 +55,14 @@ class CoinSorter:
         self._send_command(f"M1:{int(speed)}")
 
     def set_conveyor_speed(self, speed):
-        """コンベア(M2, M3)の速度設定 (0-255)"""
+        """コンベア(M2, M3)の一括速度設定 (互換性維持)"""
+        self.set_conveyor_a_speed(speed)
+        self.set_stepper_speed(speed)
+
+    def set_conveyor_a_speed(self, speed):
+        """M2 (Conv A) 速度設定 (0-255)"""
         self._send_command(f"M2:{int(speed)}")
+
+    def set_stepper_speed(self, speed):
+        """M3 (Stepper) 速度設定 (RPM相当, Arduino側で制限あり)"""
         self._send_command(f"M3:{int(speed)}")

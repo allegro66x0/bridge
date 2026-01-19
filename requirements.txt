@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+func-timeout
+numpy
+pyserial
+opencv-python
+Pillow

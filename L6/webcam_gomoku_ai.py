@@ -1,6 +1,7 @@
 import cv2
 import numpy as np 
 import time
+import threading
 import gomoku_board_recognition as gbr
 from PIL import Image, ImageDraw, ImageFont
 import copy 
@@ -24,25 +25,28 @@ except ImportError:
         SEARCH_DEPTH = 5
         FIXED_CORNER_POINTS = [(306, 216), (394, 213), (408, 326), (305, 314)]
 
-# --- Add src path to find hardware module ---
+# --- Add src path ---
 sys.path.append(os.path.join(os.path.dirname(__file__), '../src'))
 from hardware.coin_sorter import CoinSorter
+from hardware.magnet_control import MagnetControl
 
 # ===============================================================
 # Robot Control Settings
 # ===============================================================
 SERIAL_PORT_GANTRY = config.SERIAL_PORT_GANTRY 
+SERIAL_PORT_MAGNET = config.SERIAL_PORT_MAGNET
 SERIAL_PORT_SORTER = config.SERIAL_PORT_SORTER
 BAUD_RATE = 9600
 
 ser_gantry = None
+magnet = None
 sorter = None
 
-# Pickup ROI (Clone from old main.py)
+# Pickup ROI
 PICKUP_ROI = (50, 50, 60, 60) 
 
 def setup_robot_connection():
-    global ser_gantry
+    global ser_gantry, magnet
     # Gantry
     try:
         ser_gantry = serial.Serial(SERIAL_PORT_GANTRY, BAUD_RATE, timeout=1)
@@ -50,42 +54,81 @@ def setup_robot_connection():
     except Exception as e:
         print(f"❌ Gantry Connection Failed: {e}")
     
+    # Magnet
+    magnet = MagnetControl(SERIAL_PORT_MAGNET, BAUD_RATE)
+    if magnet.connect():
+        pass
+    else:
+        print("⚠️ Magnet Not Connected (Simulation Mode?)")
+
     # Sorter (Disabled)
     print("ℹ️ Coin Sorter: Disabled")
 
-def send_command_to_gantry(x, y):
-    """Send XXYY command to Gantry (Converted to 1-based index)"""
-    if ser_gantry and ser_gantry.is_open:
-        # AI(0-12) -> Gantry(1-13)
-        gx = x + 1
-        gy = y + 1
-        cmd = f"{gx:02}{gy:02}\n"
-        print(f"🤖 Sending to Gantry: {cmd.strip()}")
-        ser_gantry.write(cmd.encode('utf-8'))
-        
-        # Wait for 'READY' 
-        # (Blocking wait to prevent sync issues)
-        while True:
-            if ser_gantry.in_waiting > 0:
-                line = ser_gantry.readline().decode('utf-8', errors='ignore').strip()
-                if line == "READY":
-                    print("-> Gantry Ready")
-                    print("-> Gantry Ready")
-                    break
+def _send_gantry_cmd_wait(cmd):
+    """Helper to send command and wait for READY"""
+    if not ser_gantry or not ser_gantry.is_open:
+        return
+    
+    print(f"🤖 Gantry CMD: {cmd.strip()}")
+    ser_gantry.write(cmd.encode('utf-8'))
+    
+    # Blocking wait for 'READY'
+    while True:
+        if ser_gantry.in_waiting > 0:
+            line = ser_gantry.readline().decode('utf-8', errors='ignore').strip()
+            if line == "READY":
+                break
+            # print(f"  [Gantry]: {line}") # Debug output
 
 def send_home_command():
-    """Send 0000 command to return Gantry to home (Camera clear)"""
+    """Send H:ALL command to return Gantry to home"""
     if ser_gantry and ser_gantry.is_open:
-        cmd = "0000\n"
-        print(f"🤖 Sending to Gantry: HOME (0000)")
-        ser_gantry.write(cmd.encode('utf-8'))
-        
-        while True:
-            if ser_gantry.in_waiting > 0:
-                line = ser_gantry.readline().decode('utf-8', errors='ignore').strip()
-                if line == "READY":
-                    print("-> Gantry Returned Home")
-                    break
+        _send_gantry_cmd_wait("H:ALL\n")
+
+def execute_pick_and_place(x, y):
+    """
+    Coordinator Function:
+    1. Move to Supply
+    2. Magnet ON -> Down -> Up (Pick)
+    3. Move to Target(x,y)
+    4. Down -> Magnet OFF -> Up (Place)
+    5. Return Home
+    """
+    if not ser_gantry or not ser_gantry.is_open:
+        print("❌ Gantry not ready")
+        return
+
+    gx = x + 1
+    gy = y + 1
+    
+    print(f"\n--- Sequence Start: Grid ({gx}, {gy}) ---")
+
+    # 1. Move to Supply
+    _send_gantry_cmd_wait("M:SPLY\n")
+
+    # 2. Pick Sequence
+    if magnet: magnet.on()
+    time.sleep(0.5) # Wait for magnetization
+    
+    _send_gantry_cmd_wait("Z:PICK\n") # Down
+    _send_gantry_cmd_wait("Z:HOME\n") # Up
+
+    # 3. Move to Target
+    cmd_move = f"M:{gx:02}{gy:02}\n"
+    _send_gantry_cmd_wait(cmd_move)
+
+    # 4. Place Sequence
+    _send_gantry_cmd_wait("Z:PICK\n") # Down
+    
+    if magnet: magnet.off()
+    time.sleep(0.5) # Wait for drop
+    
+    _send_gantry_cmd_wait("Z:HOME\n") # Up
+
+    # 5. Return Home
+    _send_gantry_cmd_wait("M:ZERO\n")
+
+    print("--- Sequence Complete ---\n")
 
 def check_pickup_point_and_feed(frame):
     """Monitor pickup point and control sorter"""
@@ -581,8 +624,9 @@ def main_loop():
             r, c = ai_next_move[1], ai_next_move[0] 
             print(f"{c:02d}{r:02d}")
             
-            # ★ Send to Gantry
-            send_command_to_gantry(c, r)
+            # ★ Send to Gantry (Async)
+            t = threading.Thread(target=execute_pick_and_place, args=(c, r))
+            t.start()
 
             new_disc = gbr.Disc(); new_disc.color = gbr.DiscColor.BLACK; new_disc.cell = (r, c)
             confirmed_discs.append(new_disc)
@@ -646,8 +690,9 @@ def main_loop():
                         r, c = ai_next_move[1], ai_next_move[0]
                         print(f"{c:02d}{r:02d}")
                         
-                        # ★ Send to Gantry
-                        send_command_to_gantry(c, r)
+                        # ★ Send to Gantry (Async)
+                        t = threading.Thread(target=execute_pick_and_place, args=(c, r))
+                        t.start()
 
                         new_ai_disc = gbr.Disc(); new_ai_disc.color = gbr.DiscColor.BLACK; new_ai_disc.cell = (r, c)
                         confirmed_discs.append(new_ai_disc)

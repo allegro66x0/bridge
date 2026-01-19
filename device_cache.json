@@ -1,0 +1,11 @@
+{
+    "cameras": [
+        0,
+        1,
+        2
+    ],
+    "serial_ports": [
+        "COM4",
+        "COM5"
+    ]
+}

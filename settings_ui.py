@@ -62,10 +62,26 @@ class SettingsApp:
         btn_calib_sorter = ttk.Button(btn_frame, text="Sorter Calibration", command=self.run_sorter_calibration)
         btn_calib_sorter.pack(side="left", expand=True, fill="x", padx=5)
 
+        # --- Manual Control Launcher ---
+        btn_manual = tk.Button(self.root, text="🛠 Open Manual Control Tool", bg="#e0e0e0",
+                               font=("Arial", 12), command=self.open_manual_control)
+        btn_manual.grid(row=10, column=0, columnspan=4, pady=10, sticky="ew", padx=50)
+
         # --- Save Button ---
         btn_save = tk.Button(self.root, text="SAVE SETTINGS", bg="#4CAF50", fg="white", 
                              font=("Arial", 14, "bold"), command=self.save_config)
-        btn_save.grid(row=10, column=0, columnspan=4, pady=30, sticky="ew", padx=50)
+        btn_save.grid(row=11, column=0, columnspan=4, pady=20, sticky="ew", padx=50)
+
+    def open_manual_control(self):
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            manual_path = os.path.join(script_dir, "manual_control_ui.py")
+            if os.path.exists(manual_path):
+                subprocess.Popen([sys.executable, manual_path])
+            else:
+                messagebox.showerror("Error", "manual_control_ui.py not found")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch: {e}")
 
     def load_device_cache(self):
         script_dir = os.path.dirname(os.path.abspath(__file__))

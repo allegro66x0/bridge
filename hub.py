@@ -16,6 +16,7 @@ DEVICE_CACHE_FILE = os.path.join(BASE_DIR, "device_cache.json")
 
 models = {
     "1": ("Gomoku AI (Final)", os.path.join(BASE_DIR, "L6", "webcam_gomoku_ai.py")),
+    "2": ("Manual Control", os.path.join(BASE_DIR, "manual_control_ui.py")),
 }
 
 class LoadingApp:
